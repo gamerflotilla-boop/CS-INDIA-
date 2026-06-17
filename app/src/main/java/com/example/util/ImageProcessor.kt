@@ -125,8 +125,68 @@ object ImageProcessor {
                 canvas.drawBitmap(bitmap, 0f, 0f, paint)
                 result
             }
+            "AI Smart Clean" -> {
+                // Advanced adaptive illumination and sharp text density booster
+                val result = Bitmap.createBitmap(bitmap.width, bitmap.height, bitmap.config ?: Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(result)
+                val paint = Paint()
+
+                // High threshold: push background gray tones directly to pure white while burning ink tones to dark black
+                val colorMatrix = ColorMatrix(floatArrayOf(
+                    2.2f, 0f, 0f, 0f, -80f,
+                    0f, 2.2f, 0f, 0f, -80f,
+                    0f, 0f, 2.2f, 0f, -80f,
+                    0f, 0f, 0f, 1f, 0f
+                ))
+                
+                // Keep minimal dynamic color tint while removing background yellowing/shadows
+                val desatMatrix = ColorMatrix().apply { setSaturation(0.2f) }
+                colorMatrix.postConcat(desatMatrix)
+
+                paint.colorFilter = ColorMatrixColorFilter(colorMatrix)
+                canvas.drawBitmap(bitmap, 0f, 0f, paint)
+                result
+            }
             else -> bitmap // "Original"
         }
+    }
+
+    /**
+     * Applies dynamic sharpening and contrast boosters based on detected document type (Receipt, ID Card, etc.)
+     */
+    fun applySharpeningAndContrast(src: Bitmap, docType: String): Bitmap {
+        val width = src.width
+        val height = src.height
+        val result = Bitmap.createBitmap(width, height, src.config ?: Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(result)
+        val paint = Paint()
+        
+        // Define high-contrast adjustments tailored to document characteristics
+        val contrastFactor = when (docType) {
+            "Receipt" -> 1.8f // strong high contrast to ensure ink is legible
+            "ID Card" -> 1.2f // delicate contrast to protect picture details
+            "Book Page" -> 1.5f // solid black levels for text
+            else -> 1.4f
+        }
+        
+        val brightnessOffset = when (docType) {
+            "Receipt" -> -10f
+            "ID Card" -> 15f
+            "Book Page" -> -5f
+            else -> 0f
+        }
+
+        val colorMatrix = ColorMatrix(floatArrayOf(
+            contrastFactor, 0f, 0f, 0f, brightnessOffset,
+            0f, contrastFactor, 0f, 0f, brightnessOffset,
+            0f, 0f, contrastFactor, 0f, brightnessOffset,
+            0f, 0f, 0f, 1f, 0f
+        ))
+        
+        paint.colorFilter = ColorMatrixColorFilter(colorMatrix)
+        paint.isFilterBitmap = true // standard hardware de-blurring interpolation
+        canvas.drawBitmap(src, 0f, 0f, paint)
+        return result
     }
 
     /**

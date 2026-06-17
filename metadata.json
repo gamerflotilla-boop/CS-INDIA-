@@ -1,5 +1,5 @@
 {
-  "name": "Doc Scanner",
+  "name": "CsIndia",
   "description": "A professional document scanner featuring CameraX integration, perspective alignment, filters, text OCR, folder organization, and direct PDF/TXT exporting.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

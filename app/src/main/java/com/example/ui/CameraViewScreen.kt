@@ -48,15 +48,36 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.Executor
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.Date
+
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CameraViewScreen(
+    viewModel: DocScannerViewModel,
     onImageCaptured: (File) -> Unit,
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    val isBatchMode by viewModel.isBatchMode.collectAsStateWithLifecycle()
+    val batchCapturedFiles by viewModel.batchCapturedFiles.collectAsStateWithLifecycle()
+    val isBatchProcessingActive by viewModel.isBatchProcessingActive.collectAsStateWithLifecycle()
+    val batchProcessingProgress by viewModel.batchProcessingProgress.collectAsStateWithLifecycle()
+    val batchProcessingStatus by viewModel.batchProcessingStatus.collectAsStateWithLifecycle()
+
+    var showBatchSaveDialog by remember { mutableStateOf(false) }
 
     // Permission handling State
     var hasCameraPermission by remember {
@@ -160,19 +181,49 @@ fun CameraViewScreen(
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = {
-                            flashMode = if (flashMode == ImageCapture.FLASH_MODE_OFF) {
-                                ImageCapture.FLASH_MODE_ON
-                            } else {
-                                ImageCapture.FLASH_MODE_OFF
-                            }
-                        }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Icon(
-                            imageVector = if (flashMode == ImageCapture.FLASH_MODE_ON) Icons.Default.FlashOn else Icons.Default.FlashOff,
-                            contentDescription = "Flash mode"
+                        // Batch Mode Toggle Button
+                        AssistChip(
+                            onClick = { viewModel.toggleBatchMode() },
+                            label = { Text("Batch Scan", color = Color.White, fontSize = 11.sp) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.PhotoLibrary,
+                                    contentDescription = "Batch Mode Indicator",
+                                    tint = if (isBatchMode) Color.Green else Color.LightGray,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = if (isBatchMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else Color.Transparent
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(
+                                width = 1.dp,
+                                color = if (isBatchMode) Color.Green else Color.Gray
+                            ),
+                            modifier = Modifier.testTag("batch_mode_toggle_chip")
                         )
+
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        IconButton(
+                            onClick = {
+                                flashMode = if (flashMode == ImageCapture.FLASH_MODE_OFF) {
+                                    ImageCapture.FLASH_MODE_ON
+                                } else {
+                                    ImageCapture.FLASH_MODE_OFF
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = if (flashMode == ImageCapture.FLASH_MODE_ON) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                                contentDescription = "Flash mode",
+                                tint = Color.White
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -293,21 +344,34 @@ fun CameraViewScreen(
                                     ContextCompat.getMainExecutor(context),
                                     object : ImageCapture.OnImageSavedCallback {
                                         override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                                            onImageCaptured(file)
+                                            if (isBatchMode) {
+                                                viewModel.addFileToBatch(file)
+                                                android.widget.Toast.makeText(context, "Page added to batch queue! (${batchCapturedFiles.size + 1})", android.widget.Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                onImageCaptured(file)
+                                            }
                                         }
 
                                         override fun onError(exception: ImageCaptureException) {
                                             exception.printStackTrace()
-                                            // Fallback local mock simulation file in case camera is not working or unavailable inside emulator
                                             val simulatedFile = simulateMockDocumentCapture(context)
-                                            onImageCaptured(simulatedFile)
+                                            if (isBatchMode) {
+                                                viewModel.addFileToBatch(simulatedFile)
+                                                android.widget.Toast.makeText(context, "Page added to batch queue! (${batchCapturedFiles.size + 1})", android.widget.Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                onImageCaptured(simulatedFile)
+                                            }
                                         }
                                     }
                                 )
                             } else {
-                                // Fallback mock image capture for the simulator environment
                                 val simulatedFile = simulateMockDocumentCapture(context)
-                                onImageCaptured(simulatedFile)
+                                if (isBatchMode) {
+                                    viewModel.addFileToBatch(simulatedFile)
+                                    android.widget.Toast.makeText(context, "Page added to batch queue! (${batchCapturedFiles.size + 1})", android.widget.Toast.LENGTH_SHORT).show()
+                                } else {
+                                    onImageCaptured(simulatedFile)
+                                }
                             }
                         },
                         modifier = Modifier
@@ -320,14 +384,32 @@ fun CameraViewScreen(
                         // Empty action representing physical camera visual
                     }
 
-                    // Standard cancel or tip button
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .background(Color.Transparent, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        // Symmetry balance holder
+                    // Done/Check Badge button for compiling the completed Batch
+                    if (isBatchMode && batchCapturedFiles.isNotEmpty()) {
+                        IconButton(
+                            onClick = {
+                                showBatchSaveDialog = true
+                            },
+                            modifier = Modifier
+                                .size(56.dp)
+                                .background(Color.Green.copy(alpha = 0.85f), CircleShape)
+                                .testTag("batch_done_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Done",
+                                tint = Color.Black
+                            )
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .background(Color.Transparent, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            // Symmetry balance holder
+                        }
                     }
                 }
 
@@ -371,6 +453,208 @@ fun CameraViewScreen(
                         Text("Upload from Gallery instead")
                     }
                 }
+            }
+
+            // Real-time AI Batch compilation progression screen overlay
+            if (isBatchProcessingActive) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.85f))
+                        .clickable(enabled = false) {},
+                    contentAlignment = Alignment.Center
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth(0.85f)
+                            .padding(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Text(
+                                text = "✨ AI Batch Scanner Pipeline",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            CircularProgressIndicator(
+                                progress = { batchProcessingProgress },
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                                modifier = Modifier.size(56.dp)
+                            )
+                            Text(
+                                text = batchProcessingStatus,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center
+                            )
+                            LinearProgressIndicator(
+                                progress = { batchProcessingProgress },
+                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp))
+                            )
+                        }
+                    }
+                }
+            }
+
+            // AI Batch Checkout Dialog
+            if (showBatchSaveDialog) {
+                var docTitle by remember { 
+                    val sdf = SimpleDateFormat("Batch_Scan_yyyyMMdd_HHmmss", Locale.getDefault())
+                    mutableStateOf(sdf.format(Date()))
+                }
+                var selectedCategory by remember { mutableStateOf("Invoice") }
+                var selectedPriority by remember { mutableStateOf("Normal") }
+                var selectedFolderId by remember { mutableStateOf<Int?>(null) }
+                var folderDropdownExpanded by remember { mutableStateOf(false) }
+
+                val folders by viewModel.allFolders.collectAsStateWithLifecycle()
+
+                AlertDialog(
+                    onDismissRequest = { showBatchSaveDialog = false },
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = "AI", tint = MaterialTheme.colorScheme.primary)
+                            Text("AI Batch Checkout", fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                text = "You captured ${batchCapturedFiles.size} pages. AI will automatically auto-crop edges, index Text OCR, run de-blur contrast parameters, and tag categories.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            // Title
+                            OutlinedTextField(
+                                value = docTitle,
+                                onValueChange = { docTitle = it },
+                                label = { Text("Base Document Title") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().testTag("batch_title_field")
+                            )
+
+                            // Folder
+                            Box {
+                                val folderLabel = if (selectedFolderId != null) {
+                                    folders.find { it.id == selectedFolderId }?.name ?: "No Folder"
+                                } else {
+                                    "No Folder (General)"
+                                }
+                                OutlinedButton(
+                                    onClick = { folderDropdownExpanded = true },
+                                    modifier = Modifier.fillMaxWidth().testTag("batch_folder_spinner")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("In Folder: $folderLabel", fontSize = 13.sp)
+                                        Icon(Icons.Default.ArrowDropDown, contentDescription = "arrow")
+                                    }
+                                }
+                                DropdownMenu(
+                                    expanded = folderDropdownExpanded,
+                                    onDismissRequest = { folderDropdownExpanded = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("General Documents (No folder)") },
+                                        onClick = {
+                                            selectedFolderId = null
+                                            folderDropdownExpanded = false
+                                        }
+                                    )
+                                    HorizontalDivider()
+                                    folders.forEach { f ->
+                                        DropdownMenuItem(
+                                            text = { Text(f.name) },
+                                            onClick = {
+                                                selectedFolderId = f.id
+                                                folderDropdownExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Category Choices
+                            Text("Target Category:", style = MaterialTheme.typography.bodySmall, fontSize = 12.sp)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf("Invoice", "Receipt", "Financial", "Legal", "Academic", "Personal", "Other").forEach { cat ->
+                                    val isSel = selectedCategory == cat
+                                    FilterChip(
+                                        selected = isSel,
+                                        onClick = { selectedCategory = cat },
+                                        label = { Text(cat, fontSize = 11.sp) }
+                                    )
+                                }
+                            }
+
+                            // Priority Row
+                            Text("Select Priority Level:", style = MaterialTheme.typography.bodySmall, fontSize = 12.sp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf("High", "Medium", "Normal").forEach { pr ->
+                                    val isSel = selectedPriority == pr
+                                    FilterChip(
+                                        selected = isSel,
+                                        onClick = { selectedPriority = pr },
+                                        label = { Text(pr, fontSize = 11.sp) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                viewModel.processBatchQueueAndSave(
+                                    context = context,
+                                    baseTitle = docTitle,
+                                    category = selectedCategory,
+                                    priority = selectedPriority,
+                                    folderId = selectedFolderId
+                                ) {
+                                    showBatchSaveDialog = false
+                                    onNavigateBack()
+                                }
+                            },
+                            modifier = Modifier.testTag("batch_submit_btn")
+                        ) {
+                            Text("Compile & Save")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showBatchSaveDialog = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
             }
         }
     }

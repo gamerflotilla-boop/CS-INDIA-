@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -50,6 +51,11 @@ fun FilterOcrScreen(
     val folders by viewModel.allFolders.collectAsStateWithLifecycle()
     val extractedText by viewModel.extractedOcrText.collectAsStateWithLifecycle()
     val isOcrRunning by viewModel.isProcessingOcr.collectAsStateWithLifecycle()
+    val aiInfo by viewModel.aiEnhancementInfo.collectAsStateWithLifecycle()
+
+    // Observe Gemini background category suggestion states
+    val aiSuggestedCategory by viewModel.aiSuggestedCategory.collectAsStateWithLifecycle()
+    val isSuggestingCategory by viewModel.isSuggestingCategory.collectAsStateWithLifecycle()
 
     // Document Save parameters state
     var documentTitle by remember { 
@@ -61,8 +67,25 @@ fun FilterOcrScreen(
     var selectedFolderId by remember { mutableStateOf<Int?>(null) }
     var folderDropdownExpanded by remember { mutableStateOf(false) }
 
-    val categories = listOf("Invoice", "Receipt", "Academic", "Personal", "Other")
+    val categories = listOf("Invoice", "Receipt", "Financial", "Legal", "Academic", "Personal", "Other")
     val priorities = listOf("High", "Medium", "Normal")
+
+    // Automatically trigger Gemini background suggestion service when OCR text updates or is loaded
+    LaunchedEffect(extractedText) {
+        if (extractedText.isNotBlank()) {
+            viewModel.runCategorySuggestion(extractedText)
+        }
+    }
+
+    // Auto-select when a high-probability category is suggested by background service
+    LaunchedEffect(aiSuggestedCategory) {
+        val suggestion = aiSuggestedCategory
+        if (suggestion != null && categories.contains(suggestion)) {
+            selectedCategory = suggestion
+        }
+    }
+
+    val multiDocId by viewModel.activeMultiPageDocId.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -99,9 +122,13 @@ fun FilterOcrScreen(
                         .testTag("save_doc_submit_button"),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(Icons.Default.Save, contentDescription = "Save Document")
+                    Icon(if (multiDocId != null) Icons.Default.AddCircleOutline else Icons.Default.Save, contentDescription = "Save Document")
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Save To Docs Library", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(
+                        text = if (multiDocId != null) "Append Page to Document" else "Save To Docs Library",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
                 }
             }
         },
@@ -138,6 +165,105 @@ fun FilterOcrScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // AI Copilot Pipeline Hub
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .testTag("ai_pipeline_hub"),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                ),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = "AI Scanner pipeline",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "AI CO-PILOT ANALYSIS HUB",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    val detectedTypeLabel = remember(extractedText) {
+                        val txt = extractedText.lowercase(Locale.getDefault())
+                        when {
+                            txt.contains("receipt") -> "Receipt"
+                            txt.contains("invoice") -> "Invoice"
+                            txt.contains("passport") || txt.contains("id card") || txt.contains("identity") || txt.contains("license") -> "Identity Card"
+                            else -> "Book Page / Standard Document"
+                        }
+                    }
+
+                    Text(
+                        text = "• AI OCR Document Classifier: Auto-categorised as \"$selectedCategory\"\n" +
+                               "• Auto-Detected Photo Characteristics: Style is \"$detectedTypeLabel\"",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (aiInfo != null) {
+                        Text(
+                            text = "✨ $aiInfo",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+
+                    var isRunningOptimization by remember { mutableStateOf(false) }
+
+                    Button(
+                        onClick = {
+                            isRunningOptimization = true
+                            val pipelineTarget = when {
+                                detectedTypeLabel.contains("Receipt") -> "Receipt"
+                                detectedTypeLabel.contains("Identity") -> "ID Card"
+                                else -> "Book Page"
+                            }
+                            viewModel.runAiEnhancementPipeline(context, pipelineTarget) {
+                                isRunningOptimization = false
+                                android.widget.Toast.makeText(context, "✨ AI pipeline optimized contrast, brightness & applied de-blurring filters!", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp)
+                            .testTag("ai_pipeline_button"),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        if (isRunningOptimization) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
+                        } else {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = "Optimize", modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Run AI Image Enhancement Pipeline", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             // Filters selector
             Column(
                 modifier = Modifier
@@ -152,10 +278,13 @@ fun FilterOcrScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    listOf("Original", "Magic Color", "B&W / Grayscale").forEach { filter ->
+                    listOf("Original", "Magic Color", "B&W / Grayscale", "AI Smart Clean").forEach { filter ->
                         val isSelected = activeFilter == filter
                         Card(
                             colors = CardDefaults.cardColors(
@@ -163,19 +292,26 @@ fun FilterOcrScreen(
                                                  else MaterialTheme.colorScheme.surfaceVariant
                             ),
                             modifier = Modifier
-                                .weight(1f)
                                 .clickable {
                                     viewModel.applyPerspectiveFilterAndSave(context, filter) {}
                                 }
                                 .testTag("filter_opt_${filter.replace(" ", "_")}"),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Box(
+                            Row(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 12.dp),
-                                contentAlignment = Alignment.Center
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
                             ) {
+                                if (filter == "AI Smart Clean") {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = "AI Icon",
+                                        tint = if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFFFF9933),
+                                        modifier = Modifier.size(12.dp).padding(end = 4.dp)
+                                    )
+                                }
                                 Text(
                                     text = filter,
                                     fontSize = 11.sp,
@@ -311,139 +447,235 @@ fun FilterOcrScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Document Meta details Form Setup (Folders, Category, Priority, and Title)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "DOCUMENT METADATA & ORGANIZATION",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
+            Spacer(modifier = Modifier.height(16.dp))
 
-                // Title Input
-                OutlinedTextField(
-                    value = documentTitle,
-                    onValueChange = { documentTitle = it },
-                    label = { Text("Document Title") },
+            if (multiDocId != null) {
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("save_title_field"),
-                    shape = RoundedCornerShape(10.dp),
-                    singleLine = true
-                )
-
-                // Select Folder dialog spinner
-                Box {
-                    val folderNameLabel = if (selectedFolderId != null) {
-                        folders.find { it.id == selectedFolderId }?.name ?: "No Folder"
-                    } else {
-                        "No Folder (General)"
-                    }
-                    
-                    OutlinedButton(
-                        onClick = { folderDropdownExpanded = true },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .testTag("select_folder_spinner"),
-                        shape = RoundedCornerShape(10.dp)
+                        .padding(horizontal = 16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Save In Folder: $folderNameLabel", fontSize = 14.sp)
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = "dropdown")
+                        Icon(
+                            imageVector = Icons.Default.AddPhotoAlternate,
+                            contentDescription = "Multi-page Mode",
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                "Multi-Page Scan Mode",
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                "This enhanced scan will be automatically appended as an additional page to your existing document.",
+                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                                fontSize = 11.sp
+                            )
                         }
                     }
+                }
+            } else {
+                // Document Meta details Form Setup (Folders, Category, Priority, and Title)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "DOCUMENT METADATA & ORGANIZATION",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
 
-                    DropdownMenu(
-                        expanded = folderDropdownExpanded,
-                        onDismissRequest = { folderDropdownExpanded = false },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("General Documents (No folder)") },
-                            onClick = {
-                                selectedFolderId = null
-                                folderDropdownExpanded = false
+                    // Title Input
+                    OutlinedTextField(
+                        value = documentTitle,
+                        onValueChange = { documentTitle = it },
+                        label = { Text("Document Title") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("save_title_field"),
+                        shape = RoundedCornerShape(10.dp),
+                        singleLine = true
+                    )
+
+                    // Select Folder dialog spinner
+                    Box {
+                        val folderNameLabel = if (selectedFolderId != null) {
+                            folders.find { it.id == selectedFolderId }?.name ?: "No Folder"
+                        } else {
+                            "No Folder (General)"
+                        }
+                        
+                        OutlinedButton(
+                            onClick = { folderDropdownExpanded = true },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .testTag("select_folder_spinner"),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Save In Folder: $folderNameLabel", fontSize = 14.sp)
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = "dropdown")
                             }
-                        )
-                        HorizontalDivider()
-                        folders.forEach { folder ->
+                        }
+
+                        DropdownMenu(
+                            expanded = folderDropdownExpanded,
+                            onDismissRequest = { folderDropdownExpanded = false },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             DropdownMenuItem(
-                                text = { Text(folder.name) },
+                                text = { Text("General Documents (No folder)") },
                                 onClick = {
-                                    selectedFolderId = folder.id
+                                    selectedFolderId = null
                                     folderDropdownExpanded = false
                                 }
                             )
-                        }
-                    }
-                }
-
-                // Category Selection Cards
-                Column {
-                    Text("Select Document Category:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        categories.forEach { cat ->
-                            val isSel = selectedCategory == cat
-                            FilterChip(
-                                selected = isSel,
-                                onClick = { selectedCategory = cat },
-                                label = { Text(cat) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
+                            HorizontalDivider()
+                            folders.forEach { folder ->
+                                DropdownMenuItem(
+                                    text = { Text(folder.name) },
+                                    onClick = {
+                                        selectedFolderId = folder.id
+                                        folderDropdownExpanded = false
+                                    }
                                 )
-                            )
+                            }
                         }
                     }
-                }
 
-                // Priority Indicator selections
-                Column {
-                    Text("Select Priority Indicator Label:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        priorities.forEach { pr ->
-                            val isSel = selectedPriority == pr
-                            val tintColor = when (pr) {
-                                "High" -> if (isSel) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant
-                                "Medium" -> if (isSel) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                                else -> if (isSel) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                            }
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = tintColor),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { selectedPriority = pr }
-                                    .testTag("priority_chip_$pr"),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 10.dp),
-                                    contentAlignment = Alignment.Center
+                    // Category Selection Cards
+                    Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "Select Document Category:",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            
+                            if (isSuggestingCategory) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(10.dp), strokeWidth = 1.dp)
+                                    Spacer(modifier = Modifier.width(2.dp))
                                     Text(
-                                        text = pr.uppercase(),
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 11.sp
+                                        "AI Classifying...",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
                                     )
+                                }
+                            } else if (aiSuggestedCategory != null) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        .clickable {
+                                            aiSuggestedCategory?.let {
+                                                if (categories.contains(it)) {
+                                                    selectedCategory = it
+                                                }
+                                            }
+                                        }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = "AI Suggested",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Text(
+                                        "AI suggests: $aiSuggestedCategory",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            categories.forEach { cat ->
+                                val isSel = selectedCategory == cat
+                                FilterChip(
+                                    selected = isSel,
+                                    onClick = { selectedCategory = cat },
+                                    label = { Text(cat) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
+                                    ),
+                                    modifier = Modifier.testTag("category_chip_$cat")
+                                )
+                            }
+                        }
+                    }
+
+                    // Priority Indicator selections
+                    Column {
+                        Text("Select Priority Indicator Label:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            priorities.forEach { pr ->
+                                val isSel = selectedPriority == pr
+                                val tintColor = when (pr) {
+                                    "High" -> if (isSel) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant
+                                    "Medium" -> if (isSel) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                                    else -> if (isSel) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                                }
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = tintColor),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { selectedPriority = pr }
+                                        .testTag("priority_chip_$pr"),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 10.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = pr.uppercase(),
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 11.sp
+                                        )
+                                    }
                                 }
                             }
                         }

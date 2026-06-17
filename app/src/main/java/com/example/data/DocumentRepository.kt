@@ -27,7 +27,28 @@ class DocumentRepository(private val db: AppDatabase) {
     }
 
     suspend fun deleteDocument(id: Int) {
+        db.documentDao().deletePagesForDocument(id)
         db.documentDao().deleteDocumentById(id)
+    }
+
+    fun getPagesForDocument(documentId: Int): Flow<List<DocumentPage>> {
+        return db.documentDao().getPagesForDocument(documentId)
+    }
+
+    suspend fun getPagesForDocumentSync(documentId: Int): List<DocumentPage> {
+        return db.documentDao().getPagesForDocumentSync(documentId)
+    }
+
+    suspend fun insertPage(page: DocumentPage): Long {
+        return db.documentDao().insertPage(page)
+    }
+
+    suspend fun deletePagesForDocument(documentId: Int) {
+        db.documentDao().deletePagesForDocument(documentId)
+    }
+
+    suspend fun deletePageById(id: Int) {
+        db.documentDao().deletePageById(id)
     }
 
     suspend fun insertFolder(folder: Folder): Int {

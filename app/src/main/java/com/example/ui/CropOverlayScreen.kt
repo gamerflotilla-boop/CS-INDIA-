@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.RotateRight
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -52,6 +53,12 @@ fun CropOverlayScreen(
 
     var isProcessingWarp by remember { mutableStateOf(false) }
 
+    LaunchedEffect(Unit) {
+        // Automatically run real-time AI auto-cropping Fitting on screen enter to reduce manual adjustments!
+        viewModel.runAiAutoCrop()
+        android.widget.Toast.makeText(context, "✨ AI auto-detected document edges!", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -59,6 +66,19 @@ fun CropOverlayScreen(
                 navigationIcon = {
                     IconButton(onClick = onCancel) {
                         Icon(Icons.Default.Close, contentDescription = "Cancel")
+                    }
+                },
+                actions = {
+                    TextButton(
+                        onClick = {
+                            viewModel.runAiAutoCrop()
+                            android.widget.Toast.makeText(context, "✨ Edge coordinates aligned!", android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.testTag("ai_auto_fit_btn")
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = "AI Fit", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("AI Auto", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

@@ -98,6 +98,86 @@ object ExportManager {
         return pdfFile
     }
 
+    /**
+     * Generates a multi-page PDF document combining all enhanced scan pages (A4 page dimensions).
+     */
+    fun generateMultiPagePdf(context: Context, document: Document, bitmaps: List<Bitmap>): File {
+        val pdfDocument = PdfDocument()
+        val pageWidth = 595
+        val pageHeight = 842
+
+        bitmaps.forEachIndexed { index, bitmap ->
+            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, index + 1).create()
+            val page = pdfDocument.startPage(pageInfo)
+            val canvas = page.canvas
+            
+            // Draw clean background
+            canvas.drawColor(Color.WHITE)
+            
+            // Draw header info
+            val headerPaint = Paint().apply {
+                color = Color.DKGRAY
+                textSize = 14f
+                isAntiAlias = true
+            }
+            val subPaint = Paint().apply {
+                color = Color.GRAY
+                textSize = 9f
+                isAntiAlias = true
+            }
+            
+            val dateString = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+                .format(java.util.Date(document.timestamp))
+                
+            canvas.drawText("${document.title.uppercase()} - Page ${index + 1}", 36f, 40f, headerPaint)
+            canvas.drawText("Generated on: $dateString  •  Category: ${document.category}  •  Priority: ${document.priorityLabel}", 36f, 54f, subPaint)
+            
+            // Scale image to page bounds
+            val rectLeft = 36f
+            val rectTop = 64f
+            val rectRight = (pageWidth - 36f)
+            val rectBottom = (pageHeight - 64f)
+            
+            val maxImgWidth = rectRight - rectLeft
+            val maxImgHeight = rectBottom - rectTop
+            
+            val imgWidth = bitmap.width.toFloat()
+            val imgHeight = bitmap.height.toFloat()
+            
+            val scale = Math.min(maxImgWidth / imgWidth, maxImgHeight / imgHeight)
+            val finalWidth = imgWidth * scale
+            val finalHeight = imgHeight * scale
+            
+            val drawLeft = rectLeft + (maxImgWidth - finalWidth) / 2
+            val drawTop = rectTop + (maxImgHeight - finalHeight) / 2
+            
+            val scaledBitmap = Bitmap.createScaledBitmap(bitmap, finalWidth.toInt().coerceAtLeast(1), finalHeight.toInt().coerceAtLeast(1), true)
+            canvas.drawBitmap(scaledBitmap, drawLeft, drawTop, Paint())
+            
+            // Bottom identifier / watermark
+            val footerPaint = Paint().apply {
+                color = Color.LTGRAY
+                textSize = 9f
+                isAntiAlias = true
+                textAlign = Paint.Align.CENTER
+            }
+            canvas.drawText("Page ${index + 1} of ${bitmaps.size}  |  Scanned with Doc Scanner Pro", (pageWidth / 2).toFloat(), (pageHeight - 24).toFloat(), footerPaint)
+            
+            pdfDocument.finishPage(page)
+        }
+
+        // Save combined PDF in exports cache
+        val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
+        val pdfFile = File(exportDir, "${document.title.replace(" ", "_")}_MultiPage.pdf")
+        
+        FileOutputStream(pdfFile).use { out ->
+            pdfDocument.writeTo(out)
+        }
+        
+        pdfDocument.close()
+        return pdfFile
+    }
+
     private fun pageScaleBoundary(value: Float): Float {
         return if (value < 1f) 1f else value
     }

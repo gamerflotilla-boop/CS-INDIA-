@@ -34,6 +34,16 @@ data class Document(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "document_pages")
+data class DocumentPage(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val documentId: Int,
+    val originalImagePath: String,
+    val processedImagePath: String,
+    val extractedText: String = "",
+    val pageOrder: Int = 0
+)
+
 @Dao
 interface DocumentDao {
     @Query("SELECT * FROM documents ORDER BY timestamp DESC")
@@ -53,6 +63,22 @@ interface DocumentDao {
 
     @Query("DELETE FROM documents WHERE id = :id")
     suspend fun deleteDocumentById(id: Int)
+
+    // NEW PAGE MANAGEMENT DAO METHODS
+    @Query("SELECT * FROM document_pages WHERE documentId = :documentId ORDER BY pageOrder ASC")
+    fun getPagesForDocument(documentId: Int): Flow<List<DocumentPage>>
+
+    @Query("SELECT * FROM document_pages WHERE documentId = :documentId ORDER BY pageOrder ASC")
+    suspend fun getPagesForDocumentSync(documentId: Int): List<DocumentPage>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPage(page: DocumentPage): Long
+
+    @Query("DELETE FROM document_pages WHERE documentId = :documentId")
+    suspend fun deletePagesForDocument(documentId: Int)
+
+    @Query("DELETE FROM document_pages WHERE id = :id")
+    suspend fun deletePageById(id: Int)
 }
 
 @Dao
@@ -70,7 +96,7 @@ interface FolderDao {
     suspend fun deleteFolderById(id: Int)
 }
 
-@Database(entities = [Document::class, Folder::class], version = 1, exportSchema = false)
+@Database(entities = [Document::class, Folder::class, DocumentPage::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun documentDao(): DocumentDao
     abstract fun folderDao(): FolderDao
